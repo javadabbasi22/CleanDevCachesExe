@@ -283,11 +283,66 @@ function Load-Settings {
 }
 
 # کمک‌تابع برای تبدیل مقدار سلول به عدد (خالی => 0)
+# function Convert-ToDoubleSafe {
+#     param($v)
+#     if ($null -eq $v -or $v -eq "" ) { return 0.0 }
+#     try { return [double]::Parse($v) } catch { return 0.0 }
+# }
+
 function Convert-ToDoubleSafe {
     param($v)
-    if ($null -eq $v -or $v -eq "" ) { return 0.0 }
-    try { return [double]::Parse($v) } catch { return 0.0 }
+
+    # مقدار خالی => 0
+    if ($null -eq $v -or $v -eq "") { return 0.0 }
+
+    # اگر از قبل عدد است، مستقیم برگردان
+    if ($v -is [double] -or $v -is [int] -or $v -is [decimal]) {
+        return [double]$v
+    }
+
+    # متن ورودی و حذف کاراکترهای غیر ضروری (به جز ارقام و '.' و ',' و '-')
+    $s = $v.ToString().Trim()
+    $s = $s -replace "[^\d\.,\-]", ""
+
+    if ($s -eq "") { return 0.0 }
+
+    $parsed = 0.0
+    $numStyle = [System.Globalization.NumberStyles]::Number
+    $cultureInv = [System.Globalization.CultureInfo]::InvariantCulture
+    $cultureCur = [System.Globalization.CultureInfo]::CurrentCulture
+
+    # 1) تلاش با Invariant (نقطه به عنوان اعشاری)
+    if ([double]::TryParse($s, $numStyle, $cultureInv, [ref]$parsed)) { return $parsed }
+
+    # 2) تلاش با CurrentCulture (ممکنه کاما اعشاری باشه)
+    if ([double]::TryParse($s, $numStyle, $cultureCur, [ref]$parsed)) { return $parsed }
+
+    # 3) اگر هم ',' و هم '.' وجود دارد، حدس بزنیم کدوم اعشاری است:
+    if ($s -match "[\.,]" ) {
+        # حالت A: فرض کن ',' اعشاری و '.' هزارگان -> remove dots, replace comma->dot
+        $t = $s -replace "\.", "" -replace ",", "."
+        if ([double]::TryParse($t, $numStyle, $cultureInv, [ref]$parsed)) { return $parsed }
+
+        # حالت B: فرض کن '.' اعشاری و ',' هزارگان -> remove commas
+        $t2 = $s -replace ",", ""
+        if ([double]::TryParse($t2, $numStyle, $cultureInv, [ref]$parsed)) { return $parsed }
+    }
+
+    # 4) اگر فقط '.' هست ولی سیستم کاما می‌خواهد، سعی کن کاما بذاری
+    if ($s -match "\.") {
+        $t = $s -replace ",", ""
+        if ([double]::TryParse($t, $numStyle, $cultureInv, [ref]$parsed)) { return $parsed }
+    }
+
+    # 5) اگر فقط ',' هست ولی سیستم نقطه می‌خواهد، تبدیل کن
+    if ($s -match ",") {
+        $t = $s -replace "\.", "" -replace ",", "."
+        if ([double]::TryParse($t, $numStyle, $cultureInv, [ref]$parsed)) { return $parsed }
+    }
+
+    return 0.0
 }
+
 
 function Confirm-Action {
     param($message)
@@ -935,6 +990,7 @@ function Start-Scan {
             $grid.Rows[$i].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(255, 230, 230)
         }
         $progress.Value = $i + 1
+        Start-Sleep -Milliseconds 59
         [System.Windows.Forms.Application]::DoEvents()
     }
     $progress.Value = 0  # بازنشانی پس از اتمام
